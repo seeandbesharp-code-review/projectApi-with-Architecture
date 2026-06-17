@@ -166,19 +166,28 @@ builder.Services.AddAuthorization(options =>
 var app = builder.Build();
 app.UseMiddleware<RequestLog>();
 
-app.Use(async (context, next) =>
+app.UseExceptionHandler(exceptionHandlerApp =>
 {
-    try
+    exceptionHandlerApp.Run(async context =>
     {
-        await next();
-    }
-    catch (GiftAlreadyAssignedException ex)
-    {
-        context.Response.StatusCode = Microsoft.AspNetCore.Http.StatusCodes.Status409Conflict;
-        context.Response.ContentType = "application/json";
-        var payload = System.Text.Json.JsonSerializer.Serialize(new { winnerName = ex.WinnerName });
-        await context.Response.WriteAsync(payload);
-    }
+        var exceptionHandlerPathFeature = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerPathFeature>();
+        var exception = exceptionHandlerPathFeature?.Error;
+
+        if (exception is GiftAlreadyAssignedException ex)
+        {
+            context.Response.StatusCode = Microsoft.AspNetCore.Http.StatusCodes.Status409Conflict;
+            context.Response.ContentType = "application/json";
+            var payload = System.Text.Json.JsonSerializer.Serialize(new { winnerName = ex.WinnerName });
+            await context.Response.WriteAsync(payload);
+        }
+        else if (exception != null)
+        {
+            context.Response.StatusCode = Microsoft.AspNetCore.Http.StatusCodes.Status500InternalServerError;
+            context.Response.ContentType = "application/json";
+            var payload = System.Text.Json.JsonSerializer.Serialize(new { error = "An unexpected error occurred." });
+            await context.Response.WriteAsync(payload);
+        }
+    });
 });
 
 
