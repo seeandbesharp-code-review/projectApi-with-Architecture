@@ -18,8 +18,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<RedisSettings>(builder.Configuration.GetSection("Redis"));
 // 1. נסי לקחת מהכתובת המלאה ב-Environment, אם אין - קחי מהמבנה ההיררכי, אם אין - ברירת מחדל
-var redisConnectionString = builder.Configuration["Redis__ConnectionString"] 
-                         ?? builder.Configuration["Redis:ConnectionString"] 
+var redisConnectionString = builder.Configuration["Redis__ConnectionString"]
+                         ?? builder.Configuration["Redis:ConnectionString"]
                          ?? "redis:6379,password=Your_Redis_Password_123";
 
 // 2. עדכון הרישום של ה-Redis עם הגדרות עמידות
@@ -124,11 +124,12 @@ builder.Services.AddScoped<IGiftService, GiftService>();
 builder.Services.AddScoped<IPurchaseRepository, PurchaseRepository>();
 builder.Services.AddScoped<IPurchaseService, PurcheseServicecs>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
-builder.Services.AddScoped<IUserService, UserService>(); 
+builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IBasketRepository, BasketRepository>();
 builder.Services.AddScoped<IBasketService, BasketService>();
 builder.Services.AddScoped<ILotteryService, LotteryService>();
 builder.Services.AddScoped<IZipService, ZipService>();
+builder.Services.AddSingleton<IKafkaProducerService, KafkaProducerService>();
 builder.Services.AddHttpContextAccessor();
 
 
@@ -143,7 +144,7 @@ builder.Services.AddAuthentication(options =>
 })
 
 .AddJwtBearer(options =>
-{ 
+{
     options.RequireHttpsMetadata = true;
     options.SaveToken = true;
     options.TokenValidationParameters = new TokenValidationParameters
@@ -166,19 +167,28 @@ builder.Services.AddAuthorization(options =>
 var app = builder.Build();
 app.UseMiddleware<RequestLog>();
 
-app.Use(async (context, next) =>
+app.UseExceptionHandler(exceptionHandlerApp =>
 {
-    try
+    exceptionHandlerApp.Run(async context =>
     {
-        await next();
-    }
-    catch (GiftAlreadyAssignedException ex)
-    {
-        context.Response.StatusCode = Microsoft.AspNetCore.Http.StatusCodes.Status409Conflict;
-        context.Response.ContentType = "application/json";
-        var payload = System.Text.Json.JsonSerializer.Serialize(new { winnerName = ex.WinnerName });
-        await context.Response.WriteAsync(payload);
-    }
+        var exceptionHandlerPathFeature = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerPathFeature>();
+        var exception = exceptionHandlerPathFeature?.Error;
+
+        if (exception is GiftAlreadyAssignedException ex)
+        {
+            context.Response.StatusCode = Microsoft.AspNetCore.Http.StatusCodes.Status409Conflict;
+            context.Response.ContentType = "application/json";
+            var payload = System.Text.Json.JsonSerializer.Serialize(new { winnerName = ex.WinnerName });
+            await context.Response.WriteAsync(payload);
+        }
+        else if (exception != null)
+        {
+            context.Response.StatusCode = Microsoft.AspNetCore.Http.StatusCodes.Status500InternalServerError;
+            context.Response.ContentType = "application/json";
+            var payload = System.Text.Json.JsonSerializer.Serialize(new { error = "An unexpected error occurred." });
+            await context.Response.WriteAsync(payload);
+        }
+    });
 });
 
 
@@ -207,7 +217,7 @@ using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
     var context = services.GetRequiredService<Chinese_SalesDbContext>(); // תחליף בשם ה-Context שלך
-    context.Database.EnsureCreated(); 
+    context.Database.EnsureCreated();
 }
 
 app.Run();
